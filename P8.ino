@@ -8,6 +8,11 @@ byte U1v = 36; //36;
 byte U2v = 30; //30;
 byte volt = U1v; 
 
+
+const int RED       = 10;
+const int GREEN     = 11;
+const int BLUE      = 12;
+
 const int wSine     = 0b0000000000000000;
 const int wTriangle = 0b0000000000000010;
 const int wSquare   = 0b0000000000101000;
@@ -29,8 +34,8 @@ byte debug = 1;  //отладка 0-без вывода. 1-график. 2-те�
 unsigned long t1,ts=0;
 int n=0;
 bool z=1,cal_pass=0;//  Г2Д   Г5Д    Г8Д
-word f_min=30000;  //31700  32900  36500
-word f_max=40000;  //32900  36500  39700
+word f_min=32900;  //31700  32900  36500
+word f_max=36500;  //32900  36500  39700
 byte reg_counter = 0;
 bool brk=0;
 unsigned int brk_count=0;
@@ -125,13 +130,13 @@ unsigned int adc(void){unsigned int raw=0; for (int i=0;i<32;i++) {if(Serial.ava
 void slowSearch(byte cell_number)
 {
 float floatValue = convertToFloat(mb.Ireg(cell_number), mb.Ireg(cell_number+1));
-fr = floatValue -15;
+fr = floatValue - 9; // 15Гц отскок частоты от предыдущего значения
 float fine_fr=0;
 byte count_avr = 1;
 if (correction[cell_number]>16) correction[cell_number]=16;
 if (correction[cell_number]<-15) correction[cell_number]=-15;
 volt = U1v + correction[cell_number];
-digitalWrite(13,1);
+digitalWrite(GREEN,1);
 brk=0;
         while(1)
               { SG_freqSet(fr+k, waveType);
@@ -158,7 +163,7 @@ brk=0;
                 if ((t>1)&&(t<101))k=k+0.09;
                 if (t<2)k=k+0.6;
 }
-              digitalWrite(13,0);
+             
              if(!brk) SG_freqSet(fr+300, waveType);
              while (brk_count<500)
                 {
@@ -193,11 +198,10 @@ brk=0;
           }               
 
 //-----------------------------------------------------------------------------
-// Sweep
+// Sweep           если гирлянда слабая - вспышки красного. если чуть недотягивает вспышки синего. если датчик зацепился загорается зеленый - по вспышкам зеленого можно считать кол-во датчиков. 
 //-----------------------------------------------------------------------------
 void Sweep() {
    raw_fr_count=0;
-   digitalWrite(13,0);
    unsigned int i = 0;
    volt = U2v;
    while(f_min+i < f_max)
@@ -205,26 +209,27 @@ void Sweep() {
                 raw_adc =0;
                 for (int m = 0; m < 5; m++) { raw_adc = raw_adc + analogRead(A0); delayMicroseconds(1500); }
                 raw_adc =  raw_adc /5;
-     if (debug==1)  Serial.println(raw_adc);// Serial.println(raw_adc); //Раскомментировать для отладки
+                if (raw_adc>5 && raw_adc<30) digitalWrite(RED,1);
+                if (raw_adc>30 && raw_adc<60){ digitalWrite(RED,0);digitalWrite(BLUE,1);}
+                if (debug==1)  Serial.println(raw_adc);// Serial.println(raw_adc); //Раскомментировать для отладки
                 if((raw_adc > 59) && (millis() - t1 >400))
-                                                         { digitalWrite(13,1);
-                                                           float ff = f_min+i-8;
+                                                         { float ff = f_min+i-8;
                                                            uint32_t floatBits = *(uint32_t*)&(ff); 
                                                            mb.Ireg(raw_fr_count,((floatBits >> 16) & 0xFFFF)); 
                                                            mb.Ireg(raw_fr_count+1,floatBits & 0xFFFF);
                                                            float floatValue = convertToFloat(mb.Ireg(raw_fr_count), mb.Ireg(raw_fr_count+1));
-                                                           Serial.print(floatValue);
-                                                           Serial.print("|");
+                                          if (debug==2)    Serial.print(floatValue);
+                                          if (debug==2)    Serial.print("|");
                                                            raw_fr_count += 2;   
                                                            i=i+frequency_shift;
                                                            SG_freqSet(f_min+i, waveType);
+                                                           digitalWrite(BLUE,0);digitalWrite(GREEN,1);
                                                            delay(500);
                                                            t1=millis();
-                                                           digitalWrite(13,0);
+                                                           digitalWrite(GREEN,0);
                                                          }
            i++;
            }
-   digitalWrite(13,0);
    SG_Reset();
    raw_fr_count=0;
    Serial.println("|");
@@ -255,28 +260,27 @@ unsigned int ADC_delay_micros(unsigned int miks)
  void calibr()    
 {     fr=f_min;
       float cal_i=0;
-      unsigned int porog = 350;// порог 80
+      unsigned int porog = 300;// порог 80
       unsigned int search_break_counter = 0;
       bool search_fail = 1;
 
  while(search_fail)
  {     
       while(1)
-           {  fr++;
+           {  
+              fr++;
               search_break_counter++;
-              if (search_break_counter>600)
+              if (search_break_counter>600) // поиск первого датчика.если прочесали 600 герц и не нашли - возвращаемся на Fmin
               {search_fail=1;
               search_break_counter=0;
                fr=f_min;
                 break;
               }
               SG_freqSet(fr, waveType);
-              raw_adc = ADC_delay_micros(1000);  //1800
-               if (debug==1) Serial.println(raw_adc);
-               //Serial.print(',');
-              //Serial.println(porog);
-              
-             
+              raw_adc = ADC_delay_micros(1000);  
+              if (raw_adc>50) {digitalWrite(BLUE,1); raw_adc = ADC_delay_micros(2000); digitalWrite(BLUE,0);}
+              if (debug==1) Serial.println(raw_adc);
+                           
               if (raw_adc>porog){
                 search_fail=0;
                 break;
@@ -286,6 +290,7 @@ unsigned int ADC_delay_micros(unsigned int miks)
            
   porog = porog-50;
  }
+
                 
         // fr=fr-3;
          
@@ -300,7 +305,7 @@ unsigned int ADC_delay_micros(unsigned int miks)
                //Serial.print(',');
              //Serial.println(maxx);
               if (raw_adc > prev) {maxx = raw_adc; prev = raw_adc;}
-              if ((maxx>500)&& (raw_adc<300)) break;
+              if ((maxx>400)&& (raw_adc<200)) break;
               if (raw_adc>200)cal_i=0.03;
               if (raw_adc<201)cal_i=0.1;            
             }
@@ -311,7 +316,7 @@ unsigned int ADC_delay_micros(unsigned int miks)
     
      
         volt = 28;   //26     
-      while(raw_adc<450){SG_freqSet(fr, waveType);volt=volt+1;raw_adc=ADC_delay_micros(4000);
+      while(raw_adc<450){SG_freqSet(fr, waveType);volt=volt+1;raw_adc=ADC_delay_micros(5000);
 if (debug==1) Serial.println(raw_adc);
       delay(50);
       }
@@ -337,12 +342,12 @@ void setup (void)
 {  
   analogReference(INTERNAL4V096);
   //analogReference(INTERNAL2V048);
-  pinMode(13, OUTPUT);pinMode(SG_DATA, OUTPUT);pinMode(SG_CLK, OUTPUT);pinMode(SG_fsyncPin, OUTPUT);pinMode(CS, OUTPUT); 
+  pinMode(13, OUTPUT);pinMode(SG_DATA, OUTPUT);pinMode(SG_CLK, OUTPUT);pinMode(SG_fsyncPin, OUTPUT);pinMode(CS, OUTPUT);pinMode(RED, OUTPUT);pinMode(GREEN, OUTPUT);pinMode(BLUE, OUTPUT); 
   pinMode(A1,INPUT_PULLUP);pinMode(A2,INPUT_PULLUP);pinMode(A3,INPUT_PULLUP);pinMode(A4,INPUT_PULLUP);pinMode(A5,INPUT_PULLUP);
   pinMode(A6,INPUT_PULLUP); pinMode(A7,INPUT_PULLUP);
 
-  SlaveId |= digitalRead(A1) << 0;SlaveId |= digitalRead(A2) << 1;SlaveId |= digitalRead(A3) << 2;SlaveId |= digitalRead(A4) << 3;SlaveId |= digitalRead(A5) << 4;
-  if(debug==2){Serial.print("ID = ");Serial.println(SlaveId);}
+  //SlaveId |= digitalRead(A1) << 0;SlaveId |= digitalRead(A2) << 1;SlaveId |= digitalRead(A3) << 2;SlaveId |= digitalRead(A4) << 3;SlaveId |= digitalRead(A5) << 4;
+  if(debug==2){Serial.print("ID = ");Serial.print(SlaveId);Serial.println('!');}
   
   Serial.begin(Baudrate); 
   mb.config (Baudrate);
@@ -350,26 +355,37 @@ void setup (void)
   for(int n=0;n<120;n++) mb.addIreg(n); //Формируем таблицу регистров для Modbus.
   for(int n=0;n<10;n++) mb.addHreg(n); //Формируем таблицу регистров для Modbus.
   for(int n=0;n<60;n++)correction[n]=0;
-   
+  mb.Hreg(1,f_min);
+  mb.Hreg(2,f_max);
+  //mb.Hreg(0,1); 
   InitSigGen();// запускаем генерацию синуса на частоте f_min.
 }
 
 void loop() 
 { 
 mb.task();
-
-if (mb.Hreg(8)){   //калибровка (мигание светодиодом) если в регистр управления 8 записать '1'
-ts=millis();
-while(millis()-ts<20000){ // установка времени ручной подстройки конденсаторов балансного плеча трансформатора в мс
-  if (debug==1)Serial.println(analogRead(A0));
-  if ((analogRead(A0))>1) {digitalWrite(13,1); delay(3);digitalWrite(13,0);}
-    }  //- подстройка конденсатора
-mb.Hreg(8,0);
-}
+ 
+  if(mb.Hreg(1)!= f_min) {f_min = mb.Hreg(1);InitSigGen();}
+  if(mb.Hreg(2)!= f_max) {f_max = mb.Hreg(2);}
+    if (mb.Hreg(8)){   //калибровка (мигание светодиодом) если в регистр управления 8 записать '1'
+     ts=millis();
+     while(millis()-ts<20000){ // установка времени ручной подстройки конденсаторов балансного плеча трансформатора в мс
+     if (debug==1)Serial.println(analogRead(A0));
+     if ((analogRead(A0))>1) {digitalWrite(RED,1); delay(3);digitalWrite(RED,0);}
+     }  //- подстройка конденсатора
+     mb.Hreg(8,0);
+     }
  
 while(mb.Hreg(0)){
 mb.task();
-   if(!cal_pass){calibr();InitSigGen();delay(500);Sweep();delay(500);cal_pass=1;}
+if(mb.Hreg(9)) { cal_pass=0; 
+     for(int f=0;f<6;f++) {
+      digitalWrite(BLUE,!digitalRead(BLUE)); 
+       delay(500);} 
+         mb.Hreg(9,0);}
+   
+   if(!cal_pass){volt = 36;InitSigGen();delay(500);digitalWrite(RED,1); calibr(); InitSigGen(); delay(500); Sweep(); delay(500); cal_pass=1; digitalWrite(RED,0);}
+    
      if ((mb.Ireg(reg_counter)) && z){
        slowSearch(reg_counter);
         if(debug==2)
@@ -384,7 +400,6 @@ mb.task();
      reg_counter=0;}
       
 }
-    if(mb.Hreg(1)&& mb.Hreg(1)!= f_min) {f_min = mb.Hreg(1); InitSigGen();}
-    if(mb.Hreg(2)&& mb.Hreg(2)!= f_max) {f_max = mb.Hreg(2);}
-    if(mb.Hreg(3)&& mb.Hreg(3)!= volt)  {volt =  mb.Hreg(3); InitSigGen();}
+digitalWrite(GREEN,0);   
+    //if(mb.Hreg(3)!= volt)  {volt =  mb.Hreg(3); InitSigGen();}
 }
