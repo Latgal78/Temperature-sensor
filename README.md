@@ -1,1 +1,1 @@
-temp.sensor based on crystall oscilator
+temp. sensor based on crystal oscillator
